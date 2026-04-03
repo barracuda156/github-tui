@@ -6,7 +6,6 @@
 #include <sstream>
 #include <fstream>
 #include <unistd.h>
-#include <regex>
 #include <chrono>
 
 using namespace ftxui;
@@ -34,12 +33,6 @@ bool App::check_highlight_available() {
     pclose(pipe);
 
     return found;
-}
-
-std::string App::strip_ansi_codes(const std::string& text) {
-    // Remove ANSI escape sequences: ESC[...m
-    std::regex ansi_regex("\033\\[[0-9;]*m");
-    return std::regex_replace(text, ansi_regex, "");
 }
 
 Color App::ansi_code_to_color(int code) {
@@ -319,7 +312,14 @@ void App::load_directory(const std::string& path) {
     }
 
     for (const auto& item : tree_items_) {
-        std::string icon = (item.type == "dir") ? "[DIR]  " : "";
+        std::string icon;
+        if (item.type == "dir") {
+            icon = "[DIR]  ";
+        } else if (item.type == "symlink") {
+            icon = "[LNK]  ";
+        } else {
+            icon = "";
+        }
         std::string size_str = (item.type == "file") ? " (" + format_size(item.size) + ")" : "";
         filtered_items_.push_back(icon + item.path + size_str);
     }
@@ -742,16 +742,35 @@ void App::open_in_browser(const std::string& url) {
 }
 
 void App::copy_to_clipboard(const std::string& text) {
+    // Use temp file for safe copying (handles quotes, newlines, large content)
+    std::string temp_file = "/tmp/github-tui-copy-" + std::to_string(getpid());
+    std::ofstream ofs(temp_file);
+    if (!ofs) {
+        set_status("Failed to create temp file for clipboard");
+        return;
+    }
+    ofs << text;
+    ofs.close();
+
     std::string cmd;
 #ifdef __APPLE__
-    cmd = "echo '" + text + "' | pbcopy";
+    cmd = "cat '" + temp_file + "' | pbcopy";
 #else
     // Try xclip first, then xsel as fallback
-    cmd = "echo '" + text + "' | xclip -selection clipboard 2>/dev/null || echo '" + text + "' | xsel --clipboard 2>/dev/null";
+    cmd = "cat '" + temp_file + "' | xclip -selection clipboard 2>/dev/null || cat '" + temp_file + "' | xsel --clipboard 2>/dev/null";
 #endif
     int result = system(cmd.c_str());
+    unlink(temp_file.c_str());
+
     if (result == 0) {
-        set_status("Copied URL to clipboard: " + text);
+        // Determine what was copied for better status message
+        if (text.find("http") == 0) {
+            set_status("Copied URL to clipboard");
+        } else if (text.size() > 100) {
+            set_status("Copied file content to clipboard (" + std::to_string(text.size()) + " bytes)");
+        } else {
+            set_status("Copied to clipboard: " + text);
+        }
     } else {
         set_status("Failed to copy to clipboard (install xclip or xsel)");
     }
@@ -875,6 +894,13 @@ Component App::make_main_component() {
         if (state.label.find("[DIR]") == 0) {
             element = hbox({
                 text("[DIR]") | color(Color::Blue),
+                text(state.label.substr(5))
+            });
+        }
+        // Color [LNK] markers in cyan
+        else if (state.label.find("[LNK]") == 0) {
+            element = hbox({
+                text("[LNK]") | color(Color::Cyan),
                 text(state.label.substr(5))
             });
         }
@@ -1108,6 +1134,32 @@ Component App::make_main_component() {
     };
     auto comment_body_input = Input(&new_comment_body_, "Comment", comment_option);
 
+    // Create a Renderer component for FILE view to ensure proper rendering on older systems
+    // Renderer doesn't consume mouse events (unlike Menu), so text selection still works
+    auto file_renderer = Renderer([this] {
+        // Render only visible lines starting from scroll position
+        Elements visible_lines;
+
+        // Skip lines before scroll position, render the rest
+        for (size_t i = file_scroll_position_; i < file_lines_.size(); ++i) {
+            visible_lines.push_back(parse_ansi_line(file_lines_[i]));
+        }
+
+        std::string scroll_info = "";
+        if (!file_lines_.empty()) {
+            scroll_info = " [Line " + std::to_string(file_scroll_position_ + 1) + "/" +
+                          std::to_string(file_lines_.size()) + "]";
+        }
+
+        return vbox({
+            text(status_message_ + scroll_info) | bold | center,
+            separator(),
+            vbox(visible_lines) | flex,
+            separator(),
+            text("↑/↓/PgUp/PgDn: Scroll | s: Save | y: Copy | h: History | b: Browser | u: Copy URL | q/Esc: Back") | dim | center,
+        }) | border;
+    });
+
     auto input_with_maybe = Maybe(input_container, [this] { return view_mode_ == ViewMode::INPUT; });
     auto tree_with_maybe = Maybe(tree_menu, [this] { return view_mode_ == ViewMode::TREE; });
     auto commits_with_maybe = Maybe(commits_menu, [this] { return view_mode_ == ViewMode::COMMITS; });
@@ -1117,6 +1169,7 @@ Component App::make_main_component() {
     auto pr_commits_with_maybe = Maybe(pr_commits_menu, [this] { return view_mode_ == ViewMode::PR_COMMITS; });
     auto create_issue_with_maybe = Maybe(create_issue_container, [this] { return view_mode_ == ViewMode::CREATE_ISSUE; });
     auto add_comment_with_maybe = Maybe(comment_body_input, [this] { return view_mode_ == ViewMode::ADD_COMMENT; });
+    auto file_with_maybe = Maybe(file_renderer, [this] { return view_mode_ == ViewMode::FILE; });
 
     auto main_container = Container::Vertical({
         input_with_maybe,
@@ -1128,9 +1181,10 @@ Component App::make_main_component() {
         pr_commits_with_maybe,
         create_issue_with_maybe,
         add_comment_with_maybe,
+        file_with_maybe,
     });
 
-    return CatchEvent(Renderer(main_container, [this, owner_input, repo_input, url_input, load_button, tree_menu, commits_menu, issues_menu, prs_menu, notifications_menu, pr_commits_menu, issue_title_input, issue_body_input, comment_body_input] {
+    return CatchEvent(Renderer(main_container, [this, owner_input, repo_input, url_input, load_button, tree_menu, commits_menu, issues_menu, prs_menu, notifications_menu, pr_commits_menu, issue_title_input, issue_body_input, comment_body_input, file_renderer] {
         if (view_mode_ == ViewMode::INPUT) {
             return vbox({
                 text("GitHub Repository Viewer") | bold | center,
@@ -1517,27 +1571,8 @@ Component App::make_main_component() {
                 text(status_message_),
             }) | border;
         } else {
-            // Render only visible lines starting from scroll position
-            Elements visible_lines;
-
-            // Skip lines before scroll position, render the rest
-            for (size_t i = file_scroll_position_; i < file_lines_.size(); ++i) {
-                visible_lines.push_back(parse_ansi_line(file_lines_[i]));
-            }
-
-            std::string scroll_info = "";
-            if (!file_lines_.empty()) {
-                scroll_info = " [Line " + std::to_string(file_scroll_position_ + 1) + "/" +
-                              std::to_string(file_lines_.size()) + "]";
-            }
-
-            return vbox({
-                text(status_message_ + scroll_info) | bold | center,
-                separator(),
-                vbox(visible_lines) | flex,
-                separator(),
-                text("↑/↓/PgUp/PgDn: Scroll | s: Save | h: History | b: Browser | u: Copy URL | q/Esc: Back") | dim | center,
-            }) | border;
+            // FILE view - use dedicated renderer component (doesn't block mouse like Menu would)
+            return file_renderer->Render();
         }
     }), [this](Event event) {
         if (view_mode_ == ViewMode::TREE) {
@@ -1550,8 +1585,12 @@ Component App::make_main_component() {
                     const auto& item = tree_items_[selected_index_ - offset];
                     if (item.type == "dir") {
                         navigate_into(item.path);
-                    } else if (item.type == "file") {
+                    } else if (item.type == "file" || item.type == "symlink") {
+                        // Handle both regular files and symlinks
                         load_file(item.path);
+                    } else {
+                        // Show error for unsupported types (e.g., submodule)
+                        set_status("Cannot open item of type: " + item.type);
                     }
                 }
                 return true;
@@ -2154,8 +2193,7 @@ Component App::make_main_component() {
 
             if (event.character() == "h") {
                 // Show commit history for this file
-                std::string full_path = current_path_.empty() ? current_filename_ : current_path_ + "/" + current_filename_;
-                load_commits(full_path);
+                load_commits(get_current_file_full_path());
                 return true;
             }
 
@@ -2165,14 +2203,18 @@ Component App::make_main_component() {
             }
 
             if (event.character() == "b") {
-                std::string full_path = current_path_.empty() ? current_filename_ : current_path_ + "/" + current_filename_;
-                open_in_browser(get_github_url() + "/blob/" + current_repo_->default_branch + "/" + full_path);
+                open_in_browser(get_current_file_blob_url());
                 return true;
             }
 
             if (event.character() == "u") {
-                std::string full_path = current_path_.empty() ? current_filename_ : current_path_ + "/" + current_filename_;
-                copy_to_clipboard(get_github_url() + "/blob/" + current_repo_->default_branch + "/" + full_path);
+                copy_to_clipboard(get_current_file_blob_url());
+                return true;
+            }
+
+            if (event.character() == "y") {
+                // Copy entire file content to clipboard (vim-style yank)
+                copy_to_clipboard(file_content_);
                 return true;
             }
 
@@ -2314,6 +2356,14 @@ std::string App::format_commit_display(const Commit& commit) const {
     return commit.sha.substr(0, 7) + " - " +
            format_commit_date(commit.author.date) + " - " +
            author + " - " + first_line;
+}
+
+std::string App::get_current_file_full_path() const {
+    return current_path_.empty() ? current_filename_ : current_path_ + "/" + current_filename_;
+}
+
+std::string App::get_current_file_blob_url() const {
+    return get_github_url() + "/blob/" + current_repo_->default_branch + "/" + get_current_file_full_path();
 }
 
 void App::run() {

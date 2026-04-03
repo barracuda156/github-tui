@@ -125,7 +125,6 @@ private:
     std::string get_github_url() const;
 
     bool check_highlight_available();
-    std::string strip_ansi_codes(const std::string& text);
     std::string highlight_file(const std::string& content, const std::string& filename);
     ftxui::Element parse_ansi_line(const std::string& line_with_ansi);
     ftxui::Color ansi_code_to_color(int code);
@@ -135,4 +134,6 @@ private:
     bool check_double_click_or_enter(ftxui::Event& event);
     std::string capitalize_first(const std::string& str) const;
     std::string format_commit_display(const Commit& commit) const;
+    std::string get_current_file_full_path() const;
+    std::string get_current_file_blob_url() const;
 };
