@@ -2,7 +2,7 @@
 
 A terminal user interface for browsing GitHub repositories. Supports authentification,
 browsing, commit history, issues, PRs, notifications and saving diffs from commits. Not all
-features are supported currently.
+GitHub features are supported currently.
 
 Note, this is just a convenience tool to use on legacy platforms without Go and Rust.
 Avoid it unless you know what you are doing. Implementation is done by Claude Code; it may
@@ -37,12 +37,12 @@ github-tui --token YOUR_TOKEN_HERE
 
 3. Run the application:
 ```bash
-./github-tui
+github-tui
 ```
 
 ### Using the Application
 
-Enter owner and repository name, then press "Load Repository"
+Enter owner and repository name (alternatively, use an URL), then press Enter/"Load Repository".
 
 ## Navigation
 
