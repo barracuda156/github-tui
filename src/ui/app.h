@@ -5,9 +5,9 @@
 #include <memory>
 #include <vector>
 
-class App {
+class GithubTuiApp {
 public:
-    explicit App(std::shared_ptr<GitHubClient> client);
+    explicit GithubTuiApp(std::shared_ptr<GitHubClient> client);
 
     void run();
 

@@ -47,7 +47,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto client = std::make_shared<GitHubClient>(token_str);
-    App app(client);
+    GithubTuiApp app(client);
     app.run();
 
     return 0;

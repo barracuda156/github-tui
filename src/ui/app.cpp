@@ -11,21 +11,21 @@
 
 using namespace ftxui;
 
-App::App(std::shared_ptr<GitHubClient> client) : client_(client) {
+GithubTuiApp::GithubTuiApp(std::shared_ptr<GitHubClient> client) : client_(client) {
     highlight_available_ = check_highlight_available();
 }
 
-void App::set_status(const std::string& message) {
+void GithubTuiApp::set_status(const std::string& message) {
     status_message_ = message;
 }
 
-std::string App::format_size(size_t bytes) const {
+std::string GithubTuiApp::format_size(size_t bytes) const {
     if (bytes < 1024) return std::to_string(bytes) + " B";
     if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
     return std::to_string(bytes / (1024 * 1024)) + " MB";
 }
 
-bool App::check_highlight_available() {
+bool GithubTuiApp::check_highlight_available() {
     FILE* pipe = popen("which highlight 2>/dev/null", "r");
     if (!pipe) return false;
 
@@ -36,13 +36,13 @@ bool App::check_highlight_available() {
     return found;
 }
 
-std::string App::strip_ansi_codes(const std::string& text) {
+std::string GithubTuiApp::strip_ansi_codes(const std::string& text) {
     // Remove ANSI escape sequences: ESC[...m
     std::regex ansi_regex("\033\\[[0-9;]*m");
     return std::regex_replace(text, ansi_regex, "");
 }
 
-Color App::ansi_code_to_color(int code) {
+Color GithubTuiApp::ansi_code_to_color(int code) {
     switch (code) {
         case 30: return Color::Black;
         case 31: return Color::Red;
@@ -64,7 +64,7 @@ Color App::ansi_code_to_color(int code) {
     }
 }
 
-Element App::parse_ansi_line(const std::string& line_with_ansi) {
+Element GithubTuiApp::parse_ansi_line(const std::string& line_with_ansi) {
     Elements segments;
 
     // Extract line number from the beginning
@@ -234,7 +234,7 @@ Element App::parse_ansi_line(const std::string& line_with_ansi) {
     return segments.empty() ? text("") : hbox(segments);
 }
 
-std::string App::highlight_file(const std::string& content, const std::string& filename) {
+std::string GithubTuiApp::highlight_file(const std::string& content, const std::string& filename) {
     if (!highlight_available_) {
         return content;
     }
@@ -290,7 +290,7 @@ std::string App::highlight_file(const std::string& content, const std::string& f
     return result;
 }
 
-void App::load_repository() {
+void GithubTuiApp::load_repository() {
     auto repo = client_->get_repository(owner_, repo_);
     if (!repo) {
         set_status("Error: " + client_->get_last_error());
@@ -302,7 +302,7 @@ void App::load_repository() {
     load_directory("");
 }
 
-void App::load_directory(const std::string& path) {
+void GithubTuiApp::load_directory(const std::string& path) {
     auto contents = client_->get_directory_contents(owner_, repo_, path, current_repo_->default_branch);
     if (!contents) {
         set_status("Error: " + client_->get_last_error());
@@ -332,12 +332,12 @@ void App::load_directory(const std::string& path) {
     set_status(display_path + " - " + std::to_string(tree_items_.size()) + " items");
 }
 
-void App::navigate_into(const std::string& dir_name) {
+void GithubTuiApp::navigate_into(const std::string& dir_name) {
     std::string new_path = current_path_.empty() ? dir_name : current_path_ + "/" + dir_name;
     load_directory(new_path);
 }
 
-void App::navigate_up() {
+void GithubTuiApp::navigate_up() {
     if (current_path_.empty()) {
         return;
     }
@@ -350,7 +350,7 @@ void App::navigate_up() {
     }
 }
 
-std::string App::format_commit_date(const std::string& iso_date) const {
+std::string GithubTuiApp::format_commit_date(const std::string& iso_date) const {
     // Convert ISO 8601 date to readable format
     // Input: 2024-01-15T10:30:00Z
     // Output: 2024-01-15 10:30
@@ -360,7 +360,7 @@ std::string App::format_commit_date(const std::string& iso_date) const {
     return iso_date;
 }
 
-void App::load_commits(const std::string& path) {
+void GithubTuiApp::load_commits(const std::string& path) {
     // Reset page to 1 if viewing commits for a different path
     if (path != commits_for_path_) {
         commits_page_ = 1;
@@ -393,7 +393,7 @@ void App::load_commits(const std::string& path) {
     set_status(status);
 }
 
-void App::load_commit_detail(const std::string& sha) {
+void GithubTuiApp::load_commit_detail(const std::string& sha) {
     auto detail = client_->get_commit_details(owner_, repo_, sha);
     if (!detail) {
         set_status("Error: " + client_->get_last_error());
@@ -417,7 +417,7 @@ void App::load_commit_detail(const std::string& sha) {
     set_status("Commit " + sha.substr(0, 7));
 }
 
-void App::save_file_locally() {
+void GithubTuiApp::save_file_locally() {
     if (file_content_.empty() || current_filename_.empty()) {
         set_status("Error: No file loaded");
         return;
@@ -452,7 +452,7 @@ void App::save_file_locally() {
     set_status("Saved to " + full_path);
 }
 
-void App::save_commit_patch() {
+void GithubTuiApp::save_commit_patch() {
     if (current_commit_patch_.empty() || !current_commit_detail_) {
         set_status("Error: No commit loaded");
         return;
@@ -496,7 +496,7 @@ void App::save_commit_patch() {
     set_status("Saved patch to " + full_path);
 }
 
-void App::load_issues() {
+void GithubTuiApp::load_issues() {
     auto issues = client_->get_issues(owner_, repo_, issues_state_, issues_page_, 30);
     if (!issues) {
         set_status("Error: " + client_->get_last_error());
@@ -527,7 +527,7 @@ void App::load_issues() {
     set_status("Issues (" + state_display + ", Page " + std::to_string(issues_page_) + ") - " + std::to_string(issues_.size()) + " items");
 }
 
-void App::load_issue_detail(int number) {
+void GithubTuiApp::load_issue_detail(int number) {
     auto issue = client_->get_issue(owner_, repo_, number);
     if (!issue) {
         set_status("Error: " + client_->get_last_error());
@@ -547,7 +547,7 @@ void App::load_issue_detail(int number) {
     set_status("Issue #" + std::to_string(number));
 }
 
-void App::load_pull_requests() {
+void GithubTuiApp::load_pull_requests() {
     auto prs = client_->get_pull_requests(owner_, repo_, prs_state_, pull_requests_page_, 30);
     if (!prs) {
         set_status("Error: " + client_->get_last_error());
@@ -585,7 +585,7 @@ void App::load_pull_requests() {
     set_status("Pull Requests (" + state_display + ", Page " + std::to_string(pull_requests_page_) + ") - " + std::to_string(pull_requests_.size()) + " items");
 }
 
-void App::load_pr_detail(int number) {
+void GithubTuiApp::load_pr_detail(int number) {
     auto pr = client_->get_pull_request(owner_, repo_, number);
     if (!pr) {
         set_status("Error: " + client_->get_last_error());
@@ -612,7 +612,7 @@ void App::load_pr_detail(int number) {
     set_status("Pull Request #" + std::to_string(number));
 }
 
-void App::load_notifications() {
+void GithubTuiApp::load_notifications() {
     auto notifications = client_->get_notifications(notifications_state_, notifications_page_, 30);
     if (!notifications) {
         set_status("Error: " + client_->get_last_error());
@@ -647,7 +647,7 @@ void App::load_notifications() {
     set_status("Notifications (" + state_display + ", Page " + std::to_string(notifications_page_) + ") - " + std::to_string(notifications_.size()) + " items");
 }
 
-void App::open_notification(const Notification& notif) {
+void GithubTuiApp::open_notification(const Notification& notif) {
     // Parse subject URL: https://api.github.com/repos/{owner}/{repo}/{type}/{number}
     std::string url = notif.subject.url;
     if (url.empty()) {
@@ -721,12 +721,12 @@ void App::open_notification(const Notification& notif) {
     }
 }
 
-std::string App::get_github_url() const {
+std::string GithubTuiApp::get_github_url() const {
     if (!current_repo_) return "";
     return "https://github.com/" + owner_ + "/" + repo_;
 }
 
-void App::open_in_browser(const std::string& url) {
+void GithubTuiApp::open_in_browser(const std::string& url) {
     std::string cmd;
 #ifdef __APPLE__
     cmd = "open '" + url + "'";
@@ -741,7 +741,7 @@ void App::open_in_browser(const std::string& url) {
     }
 }
 
-void App::copy_to_clipboard(const std::string& text) {
+void GithubTuiApp::copy_to_clipboard(const std::string& text) {
     std::string cmd;
 #ifdef __APPLE__
     cmd = "echo '" + text + "' | pbcopy";
@@ -757,7 +757,7 @@ void App::copy_to_clipboard(const std::string& text) {
     }
 }
 
-void App::load_file(const std::string& filename) {
+void GithubTuiApp::load_file(const std::string& filename) {
     std::string full_path = current_path_.empty() ? filename : current_path_ + "/" + filename;
     auto content = client_->get_file_content(owner_, repo_, full_path, current_repo_->default_branch);
     if (!content) {
@@ -816,7 +816,7 @@ void App::load_file(const std::string& filename) {
     set_status(status);
 }
 
-Component App::make_main_component() {
+Component GithubTuiApp::make_main_component() {
     InputOption input_option;
     input_option.multiline = false;
     input_option.on_enter = [this] {
@@ -2225,7 +2225,7 @@ Component App::make_main_component() {
     });
 }
 
-bool App::handle_scrolling(Event& event, int& scroll_position, int max_scroll) {
+bool GithubTuiApp::handle_scrolling(Event& event, int& scroll_position, int max_scroll) {
     if (event == Event::ArrowUp) {
         scroll_position = std::max(0, scroll_position - 1);
         return true;
@@ -2260,7 +2260,7 @@ bool App::handle_scrolling(Event& event, int& scroll_position, int max_scroll) {
     return false;
 }
 
-bool App::check_double_click_or_enter(Event& event) {
+bool GithubTuiApp::check_double_click_or_enter(Event& event) {
     if (event == Event::Return) {
         return true;
     }
@@ -2286,14 +2286,14 @@ bool App::check_double_click_or_enter(Event& event) {
     return false;
 }
 
-std::string App::capitalize_first(const std::string& str) const {
+std::string GithubTuiApp::capitalize_first(const std::string& str) const {
     if (str.empty()) return str;
     std::string result = str;
     result[0] = std::toupper(result[0]);
     return result;
 }
 
-std::string App::format_commit_display(const Commit& commit) const {
+std::string GithubTuiApp::format_commit_display(const Commit& commit) const {
     // Get first line of commit message
     std::string first_line = commit.message;
     size_t newline_pos = first_line.find('\n');
@@ -2316,7 +2316,7 @@ std::string App::format_commit_display(const Commit& commit) const {
            author + " - " + first_line;
 }
 
-void App::run() {
+void GithubTuiApp::run() {
     // Check config for starting page
     auto& config = Config::instance();
     auto starting_page = config.get_starting_page();
